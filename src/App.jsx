@@ -1,4 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import Logo from './components/Logo.jsx';
+import { speak, stopSpeaking, speechSupported, greetingWord, greetingText } from './lib/speech.js';
+import { usePwaInstall } from './lib/pwa.js';
+import { useSheetSync, isValidUrl, ping } from './lib/sheetSync.js';
 
 /* =============================================================================
    KONSTANTA
@@ -13,6 +17,8 @@ const KEYS = {
   hide: 'pembukuan_hide_v1',
   wal: 'pembukuan_wallets_v1',
   bud: 'pembukuan_budget_v1',
+  meta: 'pembukuan_meta_v1',
+  sync: 'pembukuan_sync_v1',
 };
 
 const IN = 'pemasukan';
@@ -64,10 +70,6 @@ const dayLabel = (ds) => {
   if (ds === dateStr()) return 'Hari ini';
   if (ds === dateStr(new Date(Date.now() - 864e5))) return 'Kemarin';
   return new Date(`${ds}T00:00:00`).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' });
-};
-const greeting = () => {
-  const h = new Date().getHours();
-  return h < 11 ? 'Selamat pagi' : h < 15 ? 'Selamat siang' : h < 18 ? 'Selamat sore' : 'Selamat malam';
 };
 
 // Transaksi lama (sebelum fitur kantong) otomatis masuk "Dompet Utama"
@@ -131,6 +133,8 @@ const clean = {
   },
   bud: (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {}),
   hide: (v) => Boolean(v),
+  meta: (v) => ({ updatedAt: Number(v?.updatedAt) || 0 }),
+  sync: (v) => ({ url: typeof v?.url === 'string' ? v.url : '', token: typeof v?.token === 'string' ? v.token : '' }),
 };
 
 function useLocalStorage(key, initial, sanitize = (v) => v) {
@@ -165,6 +169,10 @@ const PATHS = {
   down: 'M19.5 4.5l-15 15m0 0h11.25m-11.25 0V8.25',
   up: 'M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25',
   check: 'M4.5 12.75l6 6 9-13.5',
+  speaker: 'M19.11 5.64a9 9 0 010 12.72M16.46 8.29a5.25 5.25 0 010 7.42M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.7-.51-1.94-1.35A9 9 0 012.25 12c0-.83.11-1.63.32-2.4.24-.85 1.06-1.35 1.94-1.35h2.24z',
+  sliders: 'M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75',
+  cloud: 'M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.33-7.26 3 3 0 00-3.76-3.85 5.25 5.25 0 00-10.23 2.33A4.5 4.5 0 002.25 15z',
+  install: 'M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3',
   swap: 'M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5',
   home: 'M2.25 12l8.95-8.96a1.13 1.13 0 011.59 0L21.75 12M4.5 9.75v10.13c0 .62.5 1.12 1.13 1.12H9.75v-4.88c0-.62.5-1.12 1.13-1.12h2.25c.62 0 1.12.5 1.12 1.12V21h4.13c.62 0 1.12-.5 1.12-1.13V9.75M8.25 21h8.25',
   pie: 'M10.5 6a7.5 7.5 0 107.5 7.5h-7.5V6z M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z',
@@ -254,18 +262,33 @@ function WalletChips({ wallets, value, onChange }) {
    HEADER, SALDO, NAVIGASI
    ============================================================================= */
 
-function TopBar({ month, onPrev, onNext, showMonth }) {
-  const nav = 'w-8 h-8 grid place-items-center rounded-full text-slate-500 hover:bg-blue-50 hover:text-blue-600 active:scale-90 transition';
+function TopBar({ month, onPrev, onNext, showMonth, greeting, speaking, onSpeak, onSettings, syncStatus }) {
+  const nav = 'w-9 h-9 grid place-items-center rounded-full text-slate-500 hover:bg-blue-50 hover:text-blue-600 active:scale-90 transition';
+  const dot = { syncing: 'bg-amber-400 animate-pulse', ok: 'bg-emerald-500', error: 'bg-rose-500' }[syncStatus];
   return (
-    <header className="sticky top-0 z-20 bg-slate-50 px-5 pt-5 pb-3 flex items-center justify-between gap-3">
-      <div className="min-w-0">
-        <p className="text-xs text-slate-400">{greeting()} 👋</p>
-        <p className="text-base font-extrabold text-slate-800 leading-tight truncate">{USER_NAME}</p>
+    <header className="sticky top-0 z-20 bg-slate-50 px-5 pt-5 pb-3">
+      <div className="flex items-center gap-3">
+        <Logo size={42} className="shrink-0 drop-shadow-sm" />
+        <button onClick={onSpeak} aria-label="Dengarkan sapaan" title="Ketuk untuk mendengar sapaan"
+          className="flex-1 min-w-0 text-left active:scale-[0.98] transition">
+          <p className="text-xs text-slate-400">{greeting} 👋</p>
+          <p className="flex items-center gap-1.5 text-base font-extrabold text-slate-800 leading-tight">
+            <span className="truncate">{USER_NAME}</span>
+            <span className={`shrink-0 ${speaking ? 'text-blue-600 animate-pulse' : 'text-slate-300'}`}>
+              <Icon name="speaker" size={16} sw={2} />
+            </span>
+          </p>
+        </button>
+        <button onClick={onSettings} aria-label="Pengaturan"
+          className="relative w-10 h-10 grid place-items-center rounded-full bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 active:scale-90 transition">
+          <Icon name="sliders" size={18} />
+          {dot && <span className={`absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full border-2 border-white ${dot}`} />}
+        </button>
       </div>
       {showMonth && (
-        <div className="flex items-center bg-white rounded-full border border-slate-200 p-1 shrink-0">
+        <div className="flex items-center justify-between bg-white rounded-full border border-slate-200 p-1 mt-3">
           <button onClick={onPrev} aria-label="Bulan sebelumnya" className={nav}><Icon name="left" size={16} sw={2.5} /></button>
-          <span className="px-1 text-xs font-bold text-slate-700 min-w-[96px] text-center capitalize">{monthName(month)}</span>
+          <span className="text-sm font-bold text-slate-700 capitalize">{monthName(month)}</span>
           <button onClick={onNext} aria-label="Bulan berikutnya" className={nav}><Icon name="right" size={16} sw={2.5} /></button>
         </div>
       )}
@@ -1045,6 +1068,163 @@ function TransactionSheet({ categories, wallets, defaultWallet, budgets, transac
 }
 
 /* =============================================================================
+   PENGATURAN: Google Sheets, instal aplikasi, suara
+   ============================================================================= */
+
+const statusText = { off: 'Belum terhubung', idle: 'Siap', syncing: 'Menyinkronkan…', ok: 'Tersinkron ✓', error: 'Gagal' };
+const statusTone = {
+  off: 'bg-slate-100 text-slate-500', idle: 'bg-slate-100 text-slate-500', syncing: 'bg-amber-50 text-amber-600',
+  ok: 'bg-emerald-50 text-emerald-600', error: 'bg-rose-50 text-rose-500',
+};
+
+// Tombol aksi berbahaya: ketuk dua kali agar tidak tertimpa tanpa sengaja
+function ConfirmButton({ children, onConfirm, className }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return undefined;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return (
+    <button type="button" className={className}
+      onClick={() => { if (armed) { setArmed(false); onConfirm(); } else setArmed(true); }}>
+      {armed ? 'Yakin? Ketuk lagi' : children}
+    </button>
+  );
+}
+
+function SettingsSheet({ cfg, onSaveCfg, sync, onClose, onSpeak, onNotice }) {
+  const pwa = usePwaInstall();
+  const [url, setUrl] = useState(cfg.url);
+  const [token, setToken] = useState(cfg.token);
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState(null); // { ok, text }
+
+  const connected = sync.enabled;
+  const urlOk = isValidUrl(url);
+  const lastText = sync.last
+    ? `Terakhir: ${new Date(sync.last).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`
+    : '';
+
+  const connect = async () => {
+    const next = { url: url.trim(), token: token.trim() };
+    setTesting(true);
+    setTestMsg(null);
+    try {
+      const res = await ping(next);
+      onSaveCfg(next);
+      setTestMsg({ ok: true, text: `Terhubung ke "${res.name}"` });
+      onNotice('Google Sheets terhubung');
+    } catch (e) {
+      setTestMsg({
+        ok: false,
+        text: e instanceof TypeError
+          ? 'Tidak bisa terhubung. Periksa internet dan URL Web App.'
+          : e.message,
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const disconnect = () => {
+    onSaveCfg({ url: '', token: '' });
+    setUrl(''); setToken(''); setTestMsg(null);
+    onNotice('Sinkronisasi diputus. Data tetap ada di perangkat.');
+  };
+
+  const section = 'rounded-3xl border border-slate-100 bg-slate-50 p-4 mb-4';
+  const ghost = 'py-2.5 rounded-2xl text-xs font-bold bg-white border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600 active:scale-95 transition disabled:opacity-40';
+
+  return (
+    <Shell title="Pengaturan" onClose={onClose}>
+      {/* Google Sheets */}
+      <div className={section}>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-extrabold text-slate-800 flex items-center gap-2"><Icon name="cloud" size={18} /> Database Google Sheets</p>
+          <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${statusTone[sync.status]}`}>{statusText[sync.status]}</span>
+        </div>
+
+        <label className={label}>URL Web App</label>
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec"
+          autoCapitalize="off" autoCorrect="off" spellCheck={false} className={`${field} mb-1`} />
+        {url && !urlOk && <p className="text-[11px] text-rose-500 mb-2">URL harus diawali https://script.google.com/macros/s/ dan diakhiri /exec</p>}
+
+        <label className={`${label} mt-3`}>Kode rahasia</label>
+        <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="Sama dengan TOKEN di Apps Script" type="password"
+          autoCapitalize="off" autoCorrect="off" spellCheck={false} className={`${field} mb-3`} />
+
+        <button type="button" onClick={connect} disabled={!urlOk || !token.trim() || testing} className={primaryBtn}>
+          {testing ? 'Menguji koneksi…' : connected ? 'Simpan & uji ulang' : 'Sambungkan'}
+        </button>
+        {testMsg && (
+          <p className={`text-xs font-semibold mt-3 px-3 py-2 rounded-xl ${testMsg.ok ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-500'}`}>
+            {testMsg.ok ? '✓ ' : '⚠️ '}{testMsg.text}
+          </p>
+        )}
+
+        {connected && (
+          <div className="mt-4 pt-4 border-t border-slate-200">
+            {sync.status === 'error' && sync.message && (
+              <p className="text-xs font-semibold text-rose-500 bg-rose-50 rounded-xl px-3 py-2 mb-3">⚠️ {sync.message}</p>
+            )}
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <button type="button" onClick={() => sync.sync('auto')} disabled={sync.status === 'syncing'} className={`${ghost} col-span-2`}>
+                ⟳ Sinkron sekarang {lastText && <span className="font-medium text-slate-400">· {lastText}</span>}
+              </button>
+              <ConfirmButton onConfirm={() => sync.sync('push')} className={ghost}>↑ Kirim ke Sheet</ConfirmButton>
+              <ConfirmButton onConfirm={() => sync.sync('pull')} className={ghost}>↓ Ambil dari Sheet</ConfirmButton>
+            </div>
+            <p className="text-[11px] text-slate-400 mb-3">Kirim/Ambil akan menimpa data di sisi tujuan.</p>
+            <ConfirmButton onConfirm={disconnect} className="text-xs font-bold text-rose-500 hover:underline">Putuskan sambungan</ConfirmButton>
+          </div>
+        )}
+
+        <details className="mt-4 text-xs text-slate-500">
+          <summary className="cursor-pointer font-bold text-blue-600">Cara membuat database di Google Sheets</summary>
+          <ol className="list-decimal pl-5 mt-2 space-y-1">
+            <li>Buat Google Spreadsheet baru.</li>
+            <li>Menu <b>Extensions → Apps Script</b>, tempel isi file <code>Code.gs</code>, ganti <code>TOKEN</code>.</li>
+            <li><b>Deploy → New deployment → Web app</b>: Execute as <i>Me</i>, access <i>Anyone</i>.</li>
+            <li>Salin URL Web App (berakhiran <code>/exec</code>) ke kolom di atas, isi kode rahasia yang sama.</li>
+          </ol>
+          <p className="mt-2">Panduan bergambar ada di file <code>PANDUAN-GOOGLE-SHEETS.md</code>.</p>
+        </details>
+      </div>
+
+      {/* Instal */}
+      <div className={section}>
+        <p className="text-sm font-extrabold text-slate-800 flex items-center gap-2 mb-2"><Icon name="install" size={18} /> Instal aplikasi</p>
+        {pwa.installed ? (
+          <p className="text-xs font-semibold text-emerald-600">✓ Aplikasi sudah terpasang di perangkat ini.</p>
+        ) : pwa.canInstall ? (
+          <>
+            <p className="text-xs text-slate-500 mb-3">Pasang di PC atau HP agar terbuka seperti aplikasi biasa dan bisa dipakai offline.</p>
+            <button type="button" onClick={async () => { if (await pwa.install()) onNotice('Aplikasi terpasang'); }} className={primaryBtn}>Instal sekarang</button>
+          </>
+        ) : pwa.ios ? (
+          <p className="text-xs text-slate-500">Di iPhone/iPad: buka lewat <b>Safari</b>, ketuk tombol <b>Bagikan</b> lalu pilih <b>Tambah ke Layar Utama</b>.</p>
+        ) : (
+          <p className="text-xs text-slate-500">
+            Di Chrome/Edge: klik ikon <b>Instal</b> di kolom alamat, atau menu ⋮ → <b>Instal aplikasi</b> / <b>Tambahkan ke layar utama</b>.
+          </p>
+        )}
+      </div>
+
+      {/* Suara */}
+      <div className={`${section} mb-0`}>
+        <p className="text-sm font-extrabold text-slate-800 flex items-center gap-2 mb-2"><Icon name="speaker" size={18} /> Suara sapaan</p>
+        <p className="text-xs text-slate-500 mb-3">
+          Ketuk nama di bagian atas Beranda untuk mendengar sapaan sesuai jam.
+          {!speechSupported() && ' Browser ini belum mendukung suara.'}
+        </p>
+        <button type="button" onClick={onSpeak} disabled={!speechSupported()} className={`${ghost} w-full`}>🔊 Coba dengarkan</button>
+      </div>
+    </Shell>
+  );
+}
+
+/* =============================================================================
    APP
    ============================================================================= */
 
@@ -1054,20 +1234,72 @@ function MainApp() {
   const [wallets, setWallets] = useLocalStorage(KEYS.wal, DEFAULT_WALLETS, clean.wal);
   const [budgets, setBudgets] = useLocalStorage(KEYS.bud, {}, clean.bud);
   const [hidden, setHidden] = useLocalStorage(KEYS.hide, false, clean.hide);
+  const [meta, setMeta] = useLocalStorage(KEYS.meta, { updatedAt: 0 }, clean.meta);
+  const [syncCfg, setSyncCfg] = useLocalStorage(KEYS.sync, { url: '', token: '' }, clean.sync);
 
   const [tab, setTab] = useState('home');
   const [month, setMonth] = useState(() => monthStr());
   const [typeFilter, setTypeFilter] = useState(ALL);
   const [catFilter, setCatFilter] = useState(ALL);
   const [walletFilter, setWalletFilter] = useState(ALL);
-  const [sheet, setSheet] = useState(null); // 'trx' | 'transfer' | 'budget' | 'wallet' | null
+  const [sheet, setSheet] = useState(null); // 'trx' | 'transfer' | 'budget' | 'wallet' | 'settings' | null
   const [budgetKey, setBudgetKey] = useState(null);
   const [walletEdit, setWalletEdit] = useState(null);
   const [undo, setUndo] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [now, setNow] = useState(() => new Date());
+  const [speaking, setSpeaking] = useState(false);
   const historyRef = useRef(null);
 
   useEffect(() => { window.scrollTo(0, 0); }, [tab]);
+
+  // Sapaan mengikuti jam (diperbarui tiap menit dan saat aplikasi dibuka kembali)
+  useEffect(() => {
+    const tick = () => setNow(new Date());
+    const id = setInterval(tick, 60000);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', tick); stopSpeaking(); };
+  }, []);
+
+  // Cap waktu "terakhir diubah" setiap data berubah (dipakai untuk sinkron Google Sheets)
+  const dataSig = useMemo(
+    () => JSON.stringify([transactions, categories, wallets, budgets]),
+    [transactions, categories, wallets, budgets]
+  );
+  const sigRef = useRef(dataSig);
+  const skipTouch = useRef(false);
+  useEffect(() => {
+    if (sigRef.current === dataSig) return;
+    sigRef.current = dataSig;
+    if (skipTouch.current) { skipTouch.current = false; return; }
+    setMeta({ updatedAt: Date.now() });
+  }, [dataSig, setMeta]);
+
+  const applyRemote = (s) => {
+    const next = {
+      trx: clean.trx(s.transactions), cat: clean.cat(s.categories), wal: clean.wal(s.wallets), bud: clean.bud(s.budgets),
+    };
+    // hanya lewati satu "cap waktu" jika data memang berubah, agar perubahan berikutnya tidak ikut terlewat
+    skipTouch.current = JSON.stringify([next.trx, next.cat, next.wal, next.bud]) !== sigRef.current;
+    setTransactions(next.trx); setCategories(next.cat); setWallets(next.wal); setBudgets(next.bud);
+    setMeta({ updatedAt: Number(s.updatedAt) || 0 });
+  };
+
+  const snapshot = useMemo(
+    () => ({ updatedAt: meta.updatedAt, transactions, categories, wallets, budgets }),
+    [meta.updatedAt, transactions, categories, wallets, budgets]
+  );
+  const sync = useSheetSync({
+    cfg: syncCfg, snapshot, onRemote: applyRemote, onStamp: (t) => setMeta({ updatedAt: t }),
+  });
+
+  const sayHello = () => {
+    if (speaking) { stopSpeaking(); setSpeaking(false); return; }
+    const ok = speak(greetingText(USER_NAME, new Date()), {
+      onStart: () => setSpeaking(true), onEnd: () => setSpeaking(false),
+    });
+    if (!ok) setNotice('⚠️ Browser ini belum mendukung suara');
+  };
 
   useEffect(() => {
     if (!notice) return;
@@ -1203,6 +1435,8 @@ function MainApp() {
     <div className="min-h-screen bg-slate-200 sm:py-6 font-sans selection:bg-blue-200">
       <div className="relative mx-auto w-full max-w-[420px] min-h-[100dvh] sm:min-h-[820px] bg-slate-50 sm:rounded-[32px] sm:shadow-xl pb-40">
         <TopBar month={month} showMonth={tab !== 'wallets'}
+          greeting={`Selamat ${greetingWord(now)}`} speaking={speaking} onSpeak={sayHello}
+          onSettings={() => setSheet('settings')} syncStatus={sync.status}
           onPrev={() => setMonth((m) => shiftMonth(m, -1))} onNext={() => setMonth((m) => shiftMonth(m, 1))} />
 
         {!storage.ok && (
@@ -1300,7 +1534,9 @@ function MainApp() {
 
       {notice && !undo && (
         <div className="fixed inset-x-0 bottom-36 z-40 flex justify-center px-5 pointer-events-none">
-          <div className="bg-emerald-600 text-white text-sm font-bold rounded-full px-5 py-2.5 shadow-lg animate-rise">✓ {notice}</div>
+          <div className={`text-white text-sm font-bold rounded-full px-5 py-2.5 shadow-lg animate-rise ${notice.startsWith('⚠') ? 'bg-amber-500' : 'bg-emerald-600'}`}>
+            {notice.startsWith('⚠') ? notice : `✓ ${notice}`}
+          </div>
         </div>
       )}
 
@@ -1323,6 +1559,10 @@ function MainApp() {
       )}
       {sheet === 'budget' && (
         <BudgetSheet budgets={budgets} categories={categories} initialKey={budgetKey} onClose={closeSheet} onSave={saveBudget} onRemove={removeBudget} />
+      )}
+      {sheet === 'settings' && (
+        <SettingsSheet cfg={syncCfg} onSaveCfg={setSyncCfg} sync={sync} onClose={closeSheet}
+          onSpeak={sayHello} onNotice={setNotice} />
       )}
       {sheet === 'transfer' && <TransferSheet wallets={wallets} balances={balances} onClose={closeSheet} onSave={saveTransfer} />}
       {sheet === 'wallet' && (
