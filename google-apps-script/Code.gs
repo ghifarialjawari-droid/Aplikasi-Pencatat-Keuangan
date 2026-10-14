@@ -2,13 +2,13 @@
  * Pencatat Keuangan Harian — database di Google Spreadsheet
  * -----------------------------------------------------------------
  * Tempel seluruh kode ini di Extensions → Apps Script (dari spreadsheet-mu),
- * ganti TOKEN di bawah, lalu Deploy → New deployment → Web app
- * (Execute as: Me, Who has access: Anyone). Panduan lengkap: PANDUAN-GOOGLE-SHEETS.md
+ * lalu Deploy → New deployment → Web app (Execute as: Me, Who has access: Anyone).
+ * Salin URL berakhiran /exec ke GAS_URL di src/config.js. Panduan lengkap: PANDUAN-GOOGLE-SHEETS.md
  */
 
-// GANTI dengan kode rahasia buatanmu sendiri (huruf/angka acak, minimal 12 karakter).
-// Kode yang sama harus diisi di aplikasi (⚙ Pengaturan → Kode rahasia).
-const TOKEN = 'GANTI_DENGAN_KODE_RAHASIA';
+// OPSIONAL. Kosong = tanpa kode rahasia (siapa pun yang tahu URL Web App bisa membaca/mengubah data).
+// Jika diisi, isi juga GAS_TOKEN yang sama di src/config.js.
+const TOKEN = '';
 
 // Struktur tiap tab: nama kolom + format sel
 const TABS = {
@@ -31,7 +31,7 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(20000);
-    if (body.token !== TOKEN) return json_({ ok: false, error: 'Kode rahasia salah' });
+    if (TOKEN && body.token !== TOKEN) return json_({ ok: false, error: 'Kode rahasia salah' });
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     if (body.action === 'ping') return json_({ ok: true, name: ss.getName() });

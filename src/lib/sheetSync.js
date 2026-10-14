@@ -11,7 +11,7 @@ async function call(cfg, action, extra = {}) {
     method: 'POST',
     // text/plain = "simple request": tidak memicu preflight CORS yang tidak didukung Apps Script
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ token: cfg.token, action, ...extra }),
+    body: JSON.stringify({ token: cfg.token || '', action, ...extra }),
   });
   if (!res.ok) throw new Error(`Server membalas ${res.status}`);
   let data;
@@ -42,7 +42,7 @@ export const hasData = (s) =>
  * onStamp  : (updatedAt) => void  dipanggil saat data lokal perlu diberi cap waktu
  */
 export function useSheetSync({ cfg, snapshot, onRemote, onStamp }) {
-  const enabled = isValidUrl(cfg.url) && Boolean(cfg.token);
+  const enabled = isValidUrl(cfg.url); // kode rahasia (token) bersifat opsional
   const [state, setState] = useState({ status: enabled ? 'idle' : 'off', message: '', last: null });
 
   const snapRef = useRef(snapshot);

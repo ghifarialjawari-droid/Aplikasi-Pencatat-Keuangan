@@ -10,7 +10,7 @@ Aplikasi web untuk mencatat pemasukan dan pengeluaran harian. Dibuat dengan **Re
 - **Laporan bulanan**: surplus/defisit, perbandingan dengan bulan lalu, tren 6 bulan, pengeluaran harian, kategori teratas, salin ringkasan, dan unduh CSV.
 - Riwayat dikelompokkan per hari, dengan filter jenis, kategori, dan kantong.
 - **Suara sapaan**: ketuk nama di bagian atas, aplikasi mengucapkan "Selamat pagi/siang/sore/malam, Tuan Ghifari Ganteng" sesuai jam (Web Speech API bawaan browser).
-- **Database Google Spreadsheet**: data otomatis disalin ke spreadsheet-mu lewat Google Apps Script dan dipakai bersama di HP dan PC. Lihat [PANDUAN-GOOGLE-SHEETS.md](PANDUAN-GOOGLE-SHEETS.md).
+- **Database Google Spreadsheet**: data otomatis disalin ke spreadsheet-mu lewat Google Apps Script dan dipakai bersama di HP dan PC. Cukup tempel URL Web App di `src/config.js` (tanpa kode rahasia). Lihat [PANDUAN-GOOGLE-SHEETS.md](PANDUAN-GOOGLE-SHEETS.md), termasuk catatan keamanannya.
 - **Bisa diinstal (PWA)** di PC, Android, dan iPhone, serta tetap terbuka saat offline.
 - Sembunyikan saldo, urungkan hapus, dan tanpa library chart (ringan).
 
@@ -74,6 +74,7 @@ Setelah ada versi baru, tutup lalu buka lagi aplikasinya sekali agar versi terba
 ├── src/
 │   ├── main.jsx                    # titik masuk React + daftar service worker
 │   ├── index.css                   # direktif Tailwind
+│   ├── config.js                   # GAS_URL (URL Google Apps Script)
 │   ├── App.jsx                     # tampilan dan logika aplikasi
 │   ├── components/Logo.jsx
 │   └── lib/
@@ -85,6 +86,6 @@ Setelah ada versi baru, tutup lalu buka lagi aplikasinya sekali agar versi terba
 
 ## Tentang data
 
-Data selalu tersimpan di `localStorage` browser (cepat dan bisa offline). **Tanpa Google Sheets**, data hanya ada di perangkat itu dan hilang jika data situs dihapus. **Dengan Google Sheets** (⚙ Pengaturan), data juga disalin ke spreadsheet-mu dan tersinkron antar perangkat. Tombol **Unduh CSV** di tab Laporan tetap bisa dipakai sebagai cadangan per bulan.
+Data selalu tersimpan di `localStorage` browser (cepat dan bisa offline). **Tanpa Google Sheets**, data hanya ada di perangkat itu dan hilang jika data situs dihapus. **Dengan Google Sheets** (isi `GAS_URL` di `src/config.js`), data juga disalin ke spreadsheet-mu dan tersinkron antar perangkat. Tombol **Unduh CSV** di tab Laporan tetap bisa dipakai sebagai cadangan per bulan.
 
-Kunci yang dipakai: `pembukuan_data_v4` (transaksi), `pembukuan_categories_v4` (kategori), `pembukuan_wallets_v1` (kantong), `pembukuan_budget_v1` (anggaran), `pembukuan_hide_v1` (sembunyikan saldo), `pembukuan_meta_v1` (waktu perubahan terakhir), `pembukuan_sync_v1` (pengaturan Google Sheets).
+Kunci yang dipakai: `pembukuan_data_v4` (transaksi), `pembukuan_categories_v4` (kategori), `pembukuan_wallets_v1` (kantong), `pembukuan_budget_v1` (anggaran), `pembukuan_hide_v1` (sembunyikan saldo), `pembukuan_meta_v1` (waktu perubahan terakhir).

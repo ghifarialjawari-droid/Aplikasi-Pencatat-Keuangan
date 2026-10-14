@@ -2,7 +2,11 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Logo from './components/Logo.jsx';
 import { speak, stopSpeaking, speechSupported, greetingWord, greetingText } from './lib/speech.js';
 import { usePwaInstall } from './lib/pwa.js';
-import { useSheetSync, isValidUrl, ping } from './lib/sheetSync.js';
+import { useSheetSync } from './lib/sheetSync.js';
+import { GAS_URL, GAS_TOKEN } from './config.js';
+
+// Objek tetap (bukan dibuat ulang tiap render) agar sinkronisasi tidak terpicu berulang
+const SYNC_CFG = { url: GAS_URL, token: GAS_TOKEN };
 
 /* =============================================================================
    KONSTANTA
@@ -18,7 +22,6 @@ const KEYS = {
   wal: 'pembukuan_wallets_v1',
   bud: 'pembukuan_budget_v1',
   meta: 'pembukuan_meta_v1',
-  sync: 'pembukuan_sync_v1',
 };
 
 const IN = 'pemasukan';
@@ -134,7 +137,6 @@ const clean = {
   bud: (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {}),
   hide: (v) => Boolean(v),
   meta: (v) => ({ updatedAt: Number(v?.updatedAt) || 0 }),
-  sync: (v) => ({ url: typeof v?.url === 'string' ? v.url : '', token: typeof v?.token === 'string' ? v.token : '' }),
 };
 
 function useLocalStorage(key, initial, sanitize = (v) => v) {
@@ -1071,7 +1073,7 @@ function TransactionSheet({ categories, wallets, defaultWallet, budgets, transac
    PENGATURAN: Google Sheets, instal aplikasi, suara
    ============================================================================= */
 
-const statusText = { off: 'Belum terhubung', idle: 'Siap', syncing: 'Menyinkronkan…', ok: 'Tersinkron ✓', error: 'Gagal' };
+const statusText = { off: 'Belum diatur', idle: 'Siap', syncing: 'Menyinkronkan…', ok: 'Tersinkron ✓', error: 'Gagal' };
 const statusTone = {
   off: 'bg-slate-100 text-slate-500', idle: 'bg-slate-100 text-slate-500', syncing: 'bg-amber-50 text-amber-600',
   ok: 'bg-emerald-50 text-emerald-600', error: 'bg-rose-50 text-rose-500',
@@ -1093,45 +1095,11 @@ function ConfirmButton({ children, onConfirm, className }) {
   );
 }
 
-function SettingsSheet({ cfg, onSaveCfg, sync, onClose, onSpeak, onNotice }) {
+function SettingsSheet({ sync, onClose, onSpeak, onNotice }) {
   const pwa = usePwaInstall();
-  const [url, setUrl] = useState(cfg.url);
-  const [token, setToken] = useState(cfg.token);
-  const [testing, setTesting] = useState(false);
-  const [testMsg, setTestMsg] = useState(null); // { ok, text }
-
-  const connected = sync.enabled;
-  const urlOk = isValidUrl(url);
   const lastText = sync.last
     ? `Terakhir: ${new Date(sync.last).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`
     : '';
-
-  const connect = async () => {
-    const next = { url: url.trim(), token: token.trim() };
-    setTesting(true);
-    setTestMsg(null);
-    try {
-      const res = await ping(next);
-      onSaveCfg(next);
-      setTestMsg({ ok: true, text: `Terhubung ke "${res.name}"` });
-      onNotice('Google Sheets terhubung');
-    } catch (e) {
-      setTestMsg({
-        ok: false,
-        text: e instanceof TypeError
-          ? 'Tidak bisa terhubung. Periksa internet dan URL Web App.'
-          : e.message,
-      });
-    } finally {
-      setTesting(false);
-    }
-  };
-
-  const disconnect = () => {
-    onSaveCfg({ url: '', token: '' });
-    setUrl(''); setToken(''); setTestMsg(null);
-    onNotice('Sinkronisasi diputus. Data tetap ada di perangkat.');
-  };
 
   const section = 'rounded-3xl border border-slate-100 bg-slate-50 p-4 mb-4';
   const ghost = 'py-2.5 rounded-2xl text-xs font-bold bg-white border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600 active:scale-95 transition disabled:opacity-40';
@@ -1145,26 +1113,17 @@ function SettingsSheet({ cfg, onSaveCfg, sync, onClose, onSpeak, onNotice }) {
           <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${statusTone[sync.status]}`}>{statusText[sync.status]}</span>
         </div>
 
-        <label className={label}>URL Web App</label>
-        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec"
-          autoCapitalize="off" autoCorrect="off" spellCheck={false} className={`${field} mb-1`} />
-        {url && !urlOk && <p className="text-[11px] text-rose-500 mb-2">URL harus diawali https://script.google.com/macros/s/ dan diakhiri /exec</p>}
-
-        <label className={`${label} mt-3`}>Kode rahasia</label>
-        <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="Sama dengan TOKEN di Apps Script" type="password"
-          autoCapitalize="off" autoCorrect="off" spellCheck={false} className={`${field} mb-3`} />
-
-        <button type="button" onClick={connect} disabled={!urlOk || !token.trim() || testing} className={primaryBtn}>
-          {testing ? 'Menguji koneksi…' : connected ? 'Simpan & uji ulang' : 'Sambungkan'}
-        </button>
-        {testMsg && (
-          <p className={`text-xs font-semibold mt-3 px-3 py-2 rounded-xl ${testMsg.ok ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-500'}`}>
-            {testMsg.ok ? '✓ ' : '⚠️ '}{testMsg.text}
+        {!sync.enabled ? (
+          <p className="text-xs text-slate-500">
+            Belum diatur. Tempel URL Web App di <code className="font-bold">GAS_URL</code> pada berkas <code className="font-bold">src/config.js</code>,
+            lalu deploy ulang. Selama itu, data hanya tersimpan di perangkat ini.
+            Panduan: <code className="font-bold">PANDUAN-GOOGLE-SHEETS.md</code>.
           </p>
-        )}
-
-        {connected && (
-          <div className="mt-4 pt-4 border-t border-slate-200">
+        ) : (
+          <>
+            <p className="text-xs text-slate-500 mb-3">
+              Data otomatis disalin ke Google Sheets setiap ada perubahan dan diambil saat aplikasi dibuka.
+            </p>
             {sync.status === 'error' && sync.message && (
               <p className="text-xs font-semibold text-rose-500 bg-rose-50 rounded-xl px-3 py-2 mb-3">⚠️ {sync.message}</p>
             )}
@@ -1175,21 +1134,9 @@ function SettingsSheet({ cfg, onSaveCfg, sync, onClose, onSpeak, onNotice }) {
               <ConfirmButton onConfirm={() => sync.sync('push')} className={ghost}>↑ Kirim ke Sheet</ConfirmButton>
               <ConfirmButton onConfirm={() => sync.sync('pull')} className={ghost}>↓ Ambil dari Sheet</ConfirmButton>
             </div>
-            <p className="text-[11px] text-slate-400 mb-3">Kirim/Ambil akan menimpa data di sisi tujuan.</p>
-            <ConfirmButton onConfirm={disconnect} className="text-xs font-bold text-rose-500 hover:underline">Putuskan sambungan</ConfirmButton>
-          </div>
+            <p className="text-[11px] text-slate-400">Kirim/Ambil akan menimpa data di sisi tujuan.</p>
+          </>
         )}
-
-        <details className="mt-4 text-xs text-slate-500">
-          <summary className="cursor-pointer font-bold text-blue-600">Cara membuat database di Google Sheets</summary>
-          <ol className="list-decimal pl-5 mt-2 space-y-1">
-            <li>Buat Google Spreadsheet baru.</li>
-            <li>Menu <b>Extensions → Apps Script</b>, tempel isi file <code>Code.gs</code>, ganti <code>TOKEN</code>.</li>
-            <li><b>Deploy → New deployment → Web app</b>: Execute as <i>Me</i>, access <i>Anyone</i>.</li>
-            <li>Salin URL Web App (berakhiran <code>/exec</code>) ke kolom di atas, isi kode rahasia yang sama.</li>
-          </ol>
-          <p className="mt-2">Panduan bergambar ada di file <code>PANDUAN-GOOGLE-SHEETS.md</code>.</p>
-        </details>
       </div>
 
       {/* Instal */}
@@ -1235,7 +1182,6 @@ function MainApp() {
   const [budgets, setBudgets] = useLocalStorage(KEYS.bud, {}, clean.bud);
   const [hidden, setHidden] = useLocalStorage(KEYS.hide, false, clean.hide);
   const [meta, setMeta] = useLocalStorage(KEYS.meta, { updatedAt: 0 }, clean.meta);
-  const [syncCfg, setSyncCfg] = useLocalStorage(KEYS.sync, { url: '', token: '' }, clean.sync);
 
   const [tab, setTab] = useState('home');
   const [month, setMonth] = useState(() => monthStr());
@@ -1290,7 +1236,7 @@ function MainApp() {
     [meta.updatedAt, transactions, categories, wallets, budgets]
   );
   const sync = useSheetSync({
-    cfg: syncCfg, snapshot, onRemote: applyRemote, onStamp: (t) => setMeta({ updatedAt: t }),
+    cfg: SYNC_CFG, snapshot, onRemote: applyRemote, onStamp: (t) => setMeta({ updatedAt: t }),
   });
 
   const sayHello = () => {
@@ -1561,7 +1507,7 @@ function MainApp() {
         <BudgetSheet budgets={budgets} categories={categories} initialKey={budgetKey} onClose={closeSheet} onSave={saveBudget} onRemove={removeBudget} />
       )}
       {sheet === 'settings' && (
-        <SettingsSheet cfg={syncCfg} onSaveCfg={setSyncCfg} sync={sync} onClose={closeSheet}
+        <SettingsSheet sync={sync} onClose={closeSheet}
           onSpeak={sayHello} onNotice={setNotice} />
       )}
       {sheet === 'transfer' && <TransferSheet wallets={wallets} balances={balances} onClose={closeSheet} onSave={saveTransfer} />}
