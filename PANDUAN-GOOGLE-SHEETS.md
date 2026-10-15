@@ -38,12 +38,27 @@ export const GAS_URL = 'https://script.google.com/macros/s/XXXXXXXX/exec';
 Simpan, lalu `git push` (Vercel/GitHub Pages akan membangun ulang otomatis).
 Buka aplikasi → ikon ⚙ di kanan atas: statusnya akan berubah menjadi **Tersinkron ✓**.
 
-Tab **Transaksi, Kantong, Anggaran, Kategori, dan Meta** dibuat otomatis di spreadsheet setelah sinkronisasi pertama.
+Setiap akun punya tab sendiri yang dibuat otomatis setelah sinkronisasi pertama, diawali nama akunnya:
+
+| Akun | Tab |
+| --- | --- |
+| Ghifari | `Ghifari_Transaksi`, `Ghifari_Kantong`, `Ghifari_Anggaran`, `Ghifari_Kategori`, `Ghifari_Meta` |
+| Anesya | `Anesya_Transaksi`, `Anesya_Kantong`, … |
+| Almeira | `Almeira_Transaksi`, `Almeira_Kantong`, … |
+
+Satu URL dipakai semua akun. Kalau salah satu akun ingin datanya di spreadsheet lain (mis. di akun Google miliknya sendiri), buat spreadsheet dan Web App terpisah, lalu isi di `src/config.js`:
+
+```js
+export const GAS_URLS = { anesya: 'https://script.google.com/macros/s/XXXX/exec' };
+```
+
+> Jika sebelumnya kamu memakai versi lama tanpa akun, tab lama (`Transaksi`, `Kantong`, dst.) tidak dipakai lagi. Data Ghifari yang ada di perangkat otomatis dikirim ke tab `Ghifari_…`. Setelah memastikan datanya muncul di sana, tab lama boleh dihapus.
 
 ## Cara kerja
 
 - Setiap kali kamu menambah/mengubah/menghapus data, aplikasi mengirimnya ke Sheet dalam ±1,5 detik.
 - Saat aplikasi dibuka (atau kembali dibuka dari latar belakang), aplikasi membandingkan waktu perubahan terakhir. **Data yang lebih baru menang**: kalau Sheet lebih baru, data lokal diperbarui; kalau data lokal lebih baru, Sheet diperbarui.
+- Data tiap akun tidak saling tercampur: aplikasi hanya membaca dan menulis tab milik akun yang sedang dipakai.
 - Kamu juga bisa mengedit langsung di Spreadsheet (tambah baris transaksi, ubah anggaran, dan sebagainya). Perubahan itu terambil saat aplikasi disinkron.
   Jaga format kolom: `tanggal` memakai `YYYY-MM-DD`, `jenis` berisi `pemasukan`, `pengeluaran`, atau `transfer`.
 - Tombol **Kirim ke Sheet** / **Ambil dari Sheet** di ⚙ Pengaturan untuk memaksa satu arah (akan menimpa sisi tujuan).
@@ -52,7 +67,7 @@ Tab **Transaksi, Kantong, Anggaran, Kategori, dan Meta** dibuat otomatis di spre
 
 Karena URL ditulis langsung di kode dan **tanpa kode rahasia**, siapa pun yang memiliki URL itu bisa membaca dan mengubah data keuanganmu. URL tersebut ikut terkirim ke browser setiap orang yang membuka aplikasi dan terlihat di repository GitHub-mu.
 
-Artinya, **jika alamat aplikasimu publik, orang lain yang membukanya akan ikut tersambung ke spreadsheet yang sama** dan bisa melihat data keuanganmu. Beberapa cara mengurangi risikonya:
+Artinya, **jika alamat aplikasimu publik, orang lain yang membukanya akan ikut tersambung ke spreadsheet yang sama** dan bisa melihat data keuanganmu. Pemilihan akun (Ghifari, Anesya, Almeira) hanya memisahkan data, **bukan** pengaman: tidak ada kata sandi, dan siapa pun bisa memilih akun mana pun. Beberapa cara mengurangi risikonya:
 
 - Jadikan repository GitHub **Private**, dan aktifkan perlindungan kata sandi pada situs (di Vercel: **Settings → Deployment Protection**).
 - Atau aktifkan kode rahasia: isi `TOKEN` di `Code.gs` *dan* `GAS_TOKEN` yang sama di `src/config.js`. Ini hanya menyulitkan orang yang melihat URL saja. Kode rahasia itu tetap tertulis di file JavaScript yang diunduh browser.

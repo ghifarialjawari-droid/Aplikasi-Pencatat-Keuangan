@@ -11,7 +11,7 @@ async function call(cfg, action, extra = {}) {
     method: 'POST',
     // text/plain = "simple request": tidak memicu preflight CORS yang tidak didukung Apps Script
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ token: cfg.token || '', action, ...extra }),
+    body: JSON.stringify({ token: cfg.token || '', akun: cfg.account || '', action, ...extra }),
   });
   if (!res.ok) throw new Error(`Server membalas ${res.status}`);
   let data;

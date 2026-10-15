@@ -3,26 +3,22 @@ import Logo from './components/Logo.jsx';
 import { speak, stopSpeaking, speechSupported, greetingWord, greetingText } from './lib/speech.js';
 import { usePwaInstall } from './lib/pwa.js';
 import { useSheetSync } from './lib/sheetSync.js';
-import { GAS_URL, GAS_TOKEN } from './config.js';
+import { GAS_URL, GAS_URLS, GAS_TOKEN } from './config.js';
+import Avatar from './components/Avatar.jsx';
+import { storage } from './lib/storage.js';
+import { ACCOUNTS, keysFor, readActiveAccount, writeActiveAccount, migrateLegacy } from './accounts.js';
 
-// Objek tetap (bukan dibuat ulang tiap render) agar sinkronisasi tidak terpicu berulang
-const SYNC_CFG = { url: GAS_URL, token: GAS_TOKEN };
+// Konfigurasi sinkron per akun. Dibuat sekali per akun (objek tetap) agar sinkronisasi tidak terpicu berulang.
+const cfgCache = new Map();
+const syncCfgFor = (id) => {
+  if (!cfgCache.has(id)) cfgCache.set(id, { url: (GAS_URLS && GAS_URLS[id]) || GAS_URL, token: GAS_TOKEN, account: id });
+  return cfgCache.get(id);
+};
 
 /* =============================================================================
    KONSTANTA
    Palet: Biru→Sky (aksen) + Slate (netral) + Emerald (masuk) + Rose (keluar) + Amber (peringatan)
    ============================================================================= */
-
-const USER_NAME = 'Tuan Ghifari Ganteng';
-
-const KEYS = {
-  trx: 'pembukuan_data_v4',
-  cat: 'pembukuan_categories_v4',
-  hide: 'pembukuan_hide_v1',
-  wal: 'pembukuan_wallets_v1',
-  bud: 'pembukuan_budget_v1',
-  meta: 'pembukuan_meta_v1',
-};
 
 const IN = 'pemasukan';
 const OUT = 'pengeluaran';
@@ -106,20 +102,6 @@ const walletBalances = (wallets, transactions) => {
 
 const budgetTone = (ratio) =>
   ratio >= 1 ? 'bg-rose-500' : ratio >= 0.75 ? 'bg-amber-400' : 'bg-emerald-500';
-
-/* Lapisan penyimpanan: pakai localStorage bila tersedia; kalau diblokir
-   (mis. iframe ber-sandbox) jatuh ke memori supaya aplikasi tetap bisa dipakai. */
-const memoryStore = {};
-const storage = (() => {
-  try {
-    const k = '__cek_storage__';
-    window.localStorage.setItem(k, '1');
-    window.localStorage.removeItem(k);
-    return { ok: true, get: (x) => window.localStorage.getItem(x), set: (x, v) => window.localStorage.setItem(x, v) };
-  } catch {
-    return { ok: false, get: (x) => (x in memoryStore ? memoryStore[x] : null), set: (x, v) => { memoryStore[x] = v; } };
-  }
-})();
 
 // Bersihkan data tersimpan agar data lama/rusak tidak bisa membuat aplikasi error
 const clean = {
@@ -264,7 +246,7 @@ function WalletChips({ wallets, value, onChange }) {
    HEADER, SALDO, NAVIGASI
    ============================================================================= */
 
-function TopBar({ month, onPrev, onNext, showMonth, greeting, speaking, onSpeak, onSettings, syncStatus }) {
+function TopBar({ month, onPrev, onNext, showMonth, greeting, name, account, speaking, onSpeak, onSettings, onSwitch, syncStatus }) {
   const nav = 'w-9 h-9 grid place-items-center rounded-full text-slate-500 hover:bg-blue-50 hover:text-blue-600 active:scale-90 transition';
   const dot = { syncing: 'bg-amber-400 animate-pulse', ok: 'bg-emerald-500', error: 'bg-rose-500' }[syncStatus];
   return (
@@ -275,14 +257,18 @@ function TopBar({ month, onPrev, onNext, showMonth, greeting, speaking, onSpeak,
           className="flex-1 min-w-0 text-left active:scale-[0.98] transition">
           <p className="text-xs text-slate-400">{greeting} 👋</p>
           <p className="flex items-center gap-1.5 text-base font-extrabold text-slate-800 leading-tight">
-            <span className="truncate">{USER_NAME}</span>
+            <span className="truncate">{name}</span>
             <span className={`shrink-0 ${speaking ? 'text-blue-600 animate-pulse' : 'text-slate-300'}`}>
               <Icon name="speaker" size={16} sw={2} />
             </span>
           </p>
         </button>
+        <button onClick={onSwitch} aria-label="Ganti akun" title={`Akun ${account.nama} (ketuk untuk ganti)`}
+          className="shrink-0 rounded-full ring-2 ring-white shadow-sm active:scale-90 transition">
+          <Avatar account={account} size={38} />
+        </button>
         <button onClick={onSettings} aria-label="Pengaturan"
-          className="relative w-10 h-10 grid place-items-center rounded-full bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 active:scale-90 transition">
+          className="relative shrink-0 w-10 h-10 grid place-items-center rounded-full bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 active:scale-90 transition">
           <Icon name="sliders" size={18} />
           {dot && <span className={`absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full border-2 border-white ${dot}`} />}
         </button>
@@ -715,7 +701,7 @@ function Delta({ cur, prev, goodWhenUp }) {
 
 const csvCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
-function ReportTab({ month, transactions, wmap, onMonth }) {
+function ReportTab({ month, transactions, wmap, onMonth, account }) {
   const [copied, setCopied] = useState(false);
 
   const r = useMemo(() => {
@@ -762,7 +748,7 @@ function ReportTab({ month, transactions, wmap, onMonth }) {
 
   const summaryText = () =>
     [
-      `Laporan Keuangan ${monthName(month)}`,
+      `Laporan Keuangan ${account.nama} - ${monthName(month)}`,
       `Pemasukan: ${rupiah(r.cur.income)}`,
       `Pengeluaran: ${rupiah(r.cur.expense)}`,
       `${r.net >= 0 ? 'Surplus' : 'Defisit'}: ${rupiah(Math.abs(r.net))}`,
@@ -799,7 +785,7 @@ function ReportTab({ month, transactions, wmap, onMonth }) {
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `laporan-${month}.csv`;
+    a.download = `laporan-${account.id}-${month}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1095,7 +1081,7 @@ function ConfirmButton({ children, onConfirm, className }) {
   );
 }
 
-function SettingsSheet({ sync, onClose, onSpeak, onNotice }) {
+function SettingsSheet({ sync, account, onSwitch, onClose, onSpeak, onNotice }) {
   const pwa = usePwaInstall();
   const lastText = sync.last
     ? `Terakhir: ${new Date(sync.last).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`
@@ -1106,6 +1092,19 @@ function SettingsSheet({ sync, onClose, onSpeak, onNotice }) {
 
   return (
     <Shell title="Pengaturan" onClose={onClose}>
+      {/* Akun */}
+      <div className={section}>
+        <p className="text-sm font-extrabold text-slate-800 mb-3">Akun</p>
+        <div className="flex items-center gap-3">
+          <Avatar account={account} size={44} />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-slate-800">{account.nama}</p>
+            <p className="text-[11px] text-slate-400">Data akun ini terpisah dari akun lain.</p>
+          </div>
+          <button type="button" onClick={onSwitch} className={`${ghost} px-4`}>Pilih akun lain</button>
+        </div>
+      </div>
+
       {/* Google Sheets */}
       <div className={section}>
         <div className="flex items-center justify-between mb-3">
@@ -1122,7 +1121,7 @@ function SettingsSheet({ sync, onClose, onSpeak, onNotice }) {
         ) : (
           <>
             <p className="text-xs text-slate-500 mb-3">
-              Data otomatis disalin ke Google Sheets setiap ada perubahan dan diambil saat aplikasi dibuka.
+              Data otomatis disalin ke Google Sheets setiap ada perubahan dan diambil saat aplikasi dibuka. Tab akun ini diawali "{account.nama}_" (mis. {account.nama}_Transaksi).
             </p>
             {sync.status === 'error' && sync.message && (
               <p className="text-xs font-semibold text-rose-500 bg-rose-50 rounded-xl px-3 py-2 mb-3">⚠️ {sync.message}</p>
@@ -1175,7 +1174,8 @@ function SettingsSheet({ sync, onClose, onSpeak, onNotice }) {
    APP
    ============================================================================= */
 
-function MainApp() {
+function MainApp({ account, onSwitch }) {
+  const KEYS = keysFor(account.id); // setiap akun punya kunci penyimpanan sendiri
   const [transactions, setTransactions] = useLocalStorage(KEYS.trx, [], clean.trx);
   const [categories, setCategories] = useLocalStorage(KEYS.cat, DEFAULT_CATEGORIES, clean.cat);
   const [wallets, setWallets] = useLocalStorage(KEYS.wal, DEFAULT_WALLETS, clean.wal);
@@ -1236,12 +1236,12 @@ function MainApp() {
     [meta.updatedAt, transactions, categories, wallets, budgets]
   );
   const sync = useSheetSync({
-    cfg: SYNC_CFG, snapshot, onRemote: applyRemote, onStamp: (t) => setMeta({ updatedAt: t }),
+    cfg: syncCfgFor(account.id), snapshot, onRemote: applyRemote, onStamp: (t) => setMeta({ updatedAt: t }),
   });
 
   const sayHello = () => {
     if (speaking) { stopSpeaking(); setSpeaking(false); return; }
-    const ok = speak(greetingText(USER_NAME, new Date()), {
+    const ok = speak(greetingText(account.sapaan, new Date()), {
       onStart: () => setSpeaking(true), onEnd: () => setSpeaking(false),
     });
     if (!ok) setNotice('⚠️ Browser ini belum mendukung suara');
@@ -1381,8 +1381,9 @@ function MainApp() {
     <div className="min-h-screen bg-slate-200 sm:py-6 font-sans selection:bg-blue-200">
       <div className="relative mx-auto w-full max-w-[420px] min-h-[100dvh] sm:min-h-[820px] bg-slate-50 sm:rounded-[32px] sm:shadow-xl pb-40">
         <TopBar month={month} showMonth={tab !== 'wallets'}
-          greeting={`Selamat ${greetingWord(now)}`} speaking={speaking} onSpeak={sayHello}
-          onSettings={() => setSheet('settings')} syncStatus={sync.status}
+          greeting={`Selamat ${greetingWord(now)}`} name={account.sapaan} account={account}
+          speaking={speaking} onSpeak={sayHello}
+          onSettings={() => setSheet('settings')} onSwitch={onSwitch} syncStatus={sync.status}
           onPrev={() => setMonth((m) => shiftMonth(m, -1))} onNext={() => setMonth((m) => shiftMonth(m, 1))} />
 
         {!storage.ok && (
@@ -1450,7 +1451,7 @@ function MainApp() {
           </>
         )}
 
-        {tab === 'report' && <ReportTab month={month} transactions={transactions} wmap={wmap} onMonth={setMonth} />}
+        {tab === 'report' && <ReportTab month={month} transactions={transactions} wmap={wmap} onMonth={setMonth} account={account} />}
 
         {tab === 'budget' && (
           <BudgetTab budgets={budgets} spentByCat={spentByCat} totalSpent={monthTotals.expense} onEdit={openBudget} />
@@ -1507,7 +1508,7 @@ function MainApp() {
         <BudgetSheet budgets={budgets} categories={categories} initialKey={budgetKey} onClose={closeSheet} onSave={saveBudget} onRemove={removeBudget} />
       )}
       {sheet === 'settings' && (
-        <SettingsSheet sync={sync} onClose={closeSheet}
+        <SettingsSheet sync={sync} account={account} onSwitch={onSwitch} onClose={closeSheet}
           onSpeak={sayHello} onNotice={setNotice} />
       )}
       {sheet === 'transfer' && <TransferSheet wallets={wallets} balances={balances} onClose={closeSheet} onSave={saveTransfer} />}
@@ -1572,10 +1573,60 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+/* =============================================================================
+   PEMILIH AKUN
+   ============================================================================= */
+
+function AccountPicker({ current, onPick, onCancel }) {
+  return (
+    <div className="min-h-screen bg-slate-200 sm:py-6 font-sans">
+      <div className="mx-auto w-full max-w-[420px] min-h-[100dvh] sm:min-h-[820px] bg-slate-50 sm:rounded-[32px] sm:shadow-xl px-6 py-12 flex flex-col items-center">
+        <Logo size={76} className="drop-shadow-md" />
+        <h1 className="mt-5 text-xl font-black text-slate-800">Siapa yang memakai?</h1>
+        <p className="text-xs text-slate-400 mt-1 mb-8 text-center">Data keuangan tiap akun tersimpan terpisah.</p>
+
+        <div className="w-full space-y-3">
+          {ACCOUNTS.map((a) => (
+            <button key={a.id} onClick={() => onPick(a)}
+              className={`w-full flex items-center gap-4 bg-white rounded-3xl border p-4 text-left hover:border-blue-300 hover:shadow-sm active:scale-[0.98] transition ${
+                current?.id === a.id ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-100'}`}>
+              <Avatar account={a} size={52} />
+              <span className="flex-1 min-w-0">
+                <span className="block text-base font-extrabold text-slate-800">{a.nama}</span>
+                <span className="block text-xs text-slate-400">{current?.id === a.id ? 'Sedang dipakai' : 'Ketuk untuk masuk'}</span>
+              </span>
+              <Icon name="right" size={18} sw={2.5} className="text-slate-300" />
+            </button>
+          ))}
+        </div>
+
+        {onCancel && (
+          <button onClick={onCancel} className="mt-6 text-sm font-bold text-slate-400 hover:text-blue-600 transition">Kembali</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  // Data lama (sebelum ada akun) dipindahkan ke akun pertama satu kali, lalu ingat akun terakhir yang dipakai
+  const [account, setAccount] = useState(() => { migrateLegacy(); return readActiveAccount(); });
+  const [picking, setPicking] = useState(() => !account);
+
+  const pick = (a) => {
+    writeActiveAccount(a.id);
+    setAccount(a);
+    setPicking(false);
+  };
+
   return (
     <ErrorBoundary>
-      <MainApp />
+      {picking || !account ? (
+        <AccountPicker current={account} onPick={pick} onCancel={account ? () => setPicking(false) : null} />
+      ) : (
+        // key = id akun: berpindah akun memuat ulang seluruh tampilan dengan data akun tersebut
+        <MainApp key={account.id} account={account} onSwitch={() => setPicking(true)} />
+      )}
     </ErrorBoundary>
   );
 }

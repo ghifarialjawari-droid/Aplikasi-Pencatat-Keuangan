@@ -4,6 +4,7 @@ Aplikasi web untuk mencatat pemasukan dan pengeluaran harian. Dibuat dengan **Re
 
 ## Fitur
 
+- **Akun terpisah** untuk Ghifari, Anesya, dan Almeira: tiap akun punya transaksi, kantong, anggaran, dan laporan sendiri. Pilih akun saat pertama dibuka, ganti lewat avatar di kanan atas. Akun diatur di `src/accounts.js`.
 - **Catat transaksi** pemasukan (hijau) dan pengeluaran (merah) dengan kategori, tanggal, catatan, dan nominal cepat.
 - **Kantong**: banyak dompet/rekening dengan saldo awal masing-masing, plus **transfer** antar kantong.
 - **Anggaran**: batas per kategori dan batas total bulanan, dengan indikator hijau/kuning/merah dan info sisa anggaran saat mencatat.
@@ -75,10 +76,12 @@ Setelah ada versi baru, tutup lalu buka lagi aplikasinya sekali agar versi terba
 │   ├── main.jsx                    # titik masuk React + daftar service worker
 │   ├── index.css                   # direktif Tailwind
 │   ├── config.js                   # GAS_URL (URL Google Apps Script)
+│   ├── accounts.js                 # daftar akun (nama, sapaan, warna) dan kunci data per akun
 │   ├── App.jsx                     # tampilan dan logika aplikasi
-│   ├── components/Logo.jsx
+│   ├── components/Logo.jsx · Avatar.jsx
 │   └── lib/
 │       ├── speech.js               # suara sapaan
+│       ├── storage.js              # penyimpanan (localStorage, cadangan memori)
 │       ├── sheetSync.js            # sinkronisasi Google Sheets
 │       └── pwa.js                  # tombol instal + service worker
 └── .github/workflows/deploy.yml
@@ -88,4 +91,10 @@ Setelah ada versi baru, tutup lalu buka lagi aplikasinya sekali agar versi terba
 
 Data selalu tersimpan di `localStorage` browser (cepat dan bisa offline). **Tanpa Google Sheets**, data hanya ada di perangkat itu dan hilang jika data situs dihapus. **Dengan Google Sheets** (isi `GAS_URL` di `src/config.js`), data juga disalin ke spreadsheet-mu dan tersinkron antar perangkat. Tombol **Unduh CSV** di tab Laporan tetap bisa dipakai sebagai cadangan per bulan.
 
-Kunci yang dipakai: `pembukuan_data_v4` (transaksi), `pembukuan_categories_v4` (kategori), `pembukuan_wallets_v1` (kantong), `pembukuan_budget_v1` (anggaran), `pembukuan_hide_v1` (sembunyikan saldo), `pembukuan_meta_v1` (waktu perubahan terakhir).
+Kunci yang dipakai, masing-masing diberi akhiran `:<id akun>` (mis. `pembukuan_data_v4:ghifari`): `pembukuan_data_v4` (transaksi), `pembukuan_categories_v4` (kategori), `pembukuan_wallets_v1` (kantong), `pembukuan_budget_v1` (anggaran), `pembukuan_hide_v1` (sembunyikan saldo), `pembukuan_meta_v1` (waktu perubahan terakhir). Akun yang sedang dipakai disimpan di `pembukuan_akun_aktif`.
+
+### Tentang akun
+
+Akun hanya **memisahkan data**, tidak memakai kata sandi: siapa pun yang membuka aplikasi bisa memilih akun mana pun. Data lama yang dicatat sebelum fitur akun ada otomatis dipindahkan ke akun pertama (Ghifari); data lamanya tidak dihapus.
+
+Untuk menambah atau mengubah akun, edit `src/accounts.js`. Jangan ubah `id` akun yang sudah dipakai, karena `id` menentukan lokasi datanya.
